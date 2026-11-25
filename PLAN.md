@@ -2762,8 +2762,14 @@ Run in this order. Each step says what it proves.
       reads, calibration per unit; then `ring_frame`/`LED_FRAME` for them); the band of the Shows and the Echo
       Input's one LED are not part of it; a theme pack applied from Home Assistant (root's install, as Apply) asked
       about, not built.
-- [ ] Other stock features without a Home Assistant counterpart yet (survey 2026-10-01): offline alarm clock and
-      reminders (HA has timers only).
+- [ ] Other stock features without a Home Assistant counterpart yet (survey 2026-10-01): reminders (HA has timers
+      only).
+- [x] Offline alarm clock (2026-11-25): the action `alarms` hands the Echo the times ahead (Unix seconds, the whole
+      list each time, 16 at most), kept in `state/alarms`, rung by the wall clock from the earcon thread as a finished
+      timer (`core_timer_finished`, id `alarm-<time>`, named "HH:MM"), so the sound, ring time, lights, entities and
+      stops are the timers'. More than 10 min past: dropped, logged. Setting by voice, repeats and snooze are left to
+      Home Assistant's side. Tested on the PC build only (`tests/fake_ha_esphome_timers.py`: kept, rung at its second,
+      stopped by the button, rung after a restart with no client connected); not run on an Echo yet.
       Not worth mapping: Matter (`ace_chip_service`), Sidewalk/BLE mesh, calling outside the house (`commsd`), stereo pairs.
 - [~] Calls with Amazon's call microphone (2026-11-13, Echo Dot 3): a user's calls from a Dot 3 sounded dull and full of
       the room next to a phone's, and worse than stock's Drop In had. micAsr is the ASR path (no NR, no AGC) under our

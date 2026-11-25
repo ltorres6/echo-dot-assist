@@ -169,6 +169,31 @@ System) off takes any certificate, but then anyone on your network could slip th
       has_value('sensor.kitchen_echo_next_timer') else 0 }}"
   ```
 
+### Alarms
+
+Home Assistant has no alarm clock, and one built there (an automation at a time of day, an integration) rings nothing
+while Home Assistant is down or restarting. So the Echo can keep the times itself. The action
+`esphome.<name>_alarms` takes every alarm ahead as Unix seconds in `at`, and replaces what the Echo had:
+
+```yaml
+# ring the bedroom Echo at 6:30 tomorrow, whatever happens to Home Assistant until then
+action: esphome.bedroom_echo_alarms
+data:
+  at: "{{ (today_at('06:30') + timedelta(days=1)) | as_timestamp | int }}"
+```
+
+- Several times go in one string with spaces between them (16 at most); `""` takes them all away. What the Echo keeps
+  is always the last list it was handed, so send the whole list again when one alarm changes.
+- The Echo keeps them through a restart and a power cut, and rings each by its own clock, which Home Assistant set
+  when it was last connected and which runs on without it.
+- An alarm rings as a finished timer does: the timer sound and volume, "Timers ring for", the lights, every way to
+  stop it, and "Timer ringing" in Home Assistant. "Ringing timers" names it by its time ("06:30").
+- An Echo that was off at an alarm's time rings it when it is back within ten minutes, and not at all after that.
+- What the Echo does not do: set an alarm by voice, repeat it on weekdays, snooze. That is for whatever calls the
+  action; the Echo only rings the times it was given. With a Home Assistant restart in mind, hand over the next
+  days' times, not only the next one.
+- Where the Echo has an encryption key, only Home Assistant's own connection may set alarms.
+
 ## Wake word
 
 Three engines, picked under "Wake word" on the [settings page](#settings-page):

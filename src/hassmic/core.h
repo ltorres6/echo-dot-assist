@@ -253,6 +253,10 @@ int    core_timer_next(char *name, size_t cap, unsigned *total, long long *left_
  * or what is left (paused).  The count */
 struct core_timer { char name[64]; unsigned total; int active; long long end_ms, left_ms; };
 int    core_timers_running(struct core_timer *t, int max);
+/* Alarms (lock held): times of day, as Unix seconds with anything between them, that ring here as a finished timer
+ * does, by the Echo's own clock and without Home Assistant; the whole list each time ("": none), kept across a
+ * restart.  Returns how many are kept: ALARMS_MAX at most, none more than ten minutes past */
+int    core_alarms_set(const char *list);
 void   core_alarm_stop(const char *why);                    /* every ringing timer; why: for the log */
 /* Lock held.  A "stop" another Echo heard ends the ring here (ringstop.c): as stop_word would, a run this Echo's own wake
  * word opened over the ring is dropped (listening) or starts none (its round still runs) */

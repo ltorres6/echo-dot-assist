@@ -25,6 +25,8 @@
  *                    say so until stopped or rung out, for automations; the button "Stop ringing" and the media
  *                    player's stop stop them.  "Next timer" (when the one that ends first ends), "Next timer name" and
  *                    "Next timer length" show a running one elsewhere (core_timer_next): Assist timers are no entities
+ *   alarms           the action "alarms" (esphome.<node>_alarms, at: Unix seconds) hands over the times of day this
+ *                    Echo then rings by its own clock, without Home Assistant (core_alarms_set)
  *   do not disturb   a switch; announcements are dropped while it is on
  *   arbitration      "Join arbitration network" switch and "Arbitration peers"; the action "arbitration_key" (Home
  *                    Assistant names it esphome.<node>_arbitration_key) through which other Echos hand over their
@@ -166,7 +168,7 @@ enum { KEY_NOISE = 2, KEY_MIC_LEVEL, KEY_MULT, KEY_MUTE, KEY_WAKE_SOUND, KEY_SEN
        /* the light ring live (ringlive.h): four actions, the design select, then a light per LED (RING_LEDS_MAX keys:
         * a new key goes after KEY_LIVE_LED + RING_LEDS_MAX) */
        KEY_LIVE_FRAME, KEY_LIVE_ANIM, KEY_LIVE_DESIGN_SVC, KEY_LIVE_STOP, KEY_LIVE_DESIGN, KEY_LIVE_LED,
-       KEY_PLUGIN = KEY_LIVE_LED + RING_LEDS_MAX, KEY_MWW_DEPRECATED };
+       KEY_PLUGIN = KEY_LIVE_LED + RING_LEDS_MAX, KEY_MWW_DEPRECATED, KEY_ALARMS };
 enum { MP_KEY = 1, MP_IDLE = 1, MP_PLAYING = 2, MP_PAUSED = 3, MP_CMD_PLAY = 0, MP_CMD_PAUSE = 1, MP_CMD_STOP = 2, MP_CMD_MUTE = 3, MP_CMD_UNMUTE = 4 };
 /* A music plugin is listed (plugin.h plugin_has_music, docs/plugins.md 4.7): the media player offers pause and play
  * besides, for what the plugin plays; without one the features stay what they were */
@@ -907,6 +909,11 @@ static void send_setting_entities(void)
      * player plays, so an automation had to start the music again */
     { PB(b, 128); pb_str(&b, 1, "stop_ringing"); pb_fixed32(&b, 2, KEY_TIMER_STOP); pb_str(&b, 3, "Stop ringing");
       pb_str(&b, 5, "mdi:timer-off-outline"); send_msg(LIST_BUTTON, &b); }
+    /* Alarms (main.c core_alarms_set): esphome.<node>_alarms hands over the times ahead, which then ring here by the
+     * Echo's own clock, with Home Assistant or without */
+    { PB(b, 256); PB(a, 48); pb_str(&b, 1, "alarms"); pb_fixed32(&b, 2, KEY_ALARMS);
+      pb_str(&a, 1, "at"); pb_uint(&a, 2, SVC_STRING); pb_msg(&b, 3, &a);
+      pb_str(&b, 5, "The alarms this Echo rings by itself: every time ahead as Unix seconds (\"1795700000 1795786400\"), \"\" for none"); send_msg(LIST_SERVICE, &b); }
     /* Drop In (dropin.c): "Drop In with" first, so a trigger on "Drop In" finds it set */
     if (listed(KEY_DROPIN_SERVICE)) {
         { PB(b, 256); PB(a, 48); pb_str(&b, 1, "drop_in"); pb_fixed32(&b, 2, KEY_DROPIN_SERVICE);
@@ -2041,6 +2048,12 @@ static int handle(unsigned type, const unsigned char *p, size_t len)
             char e[120];
             if (c < 0 || !clients[c].keyed) fprintf(stderr, "drop in: refused, the action did not come over the keyed connection\n");
             else if (dropin_call(args[0], e, sizeof e)) log_private("drop in: %s: %s", args[0], e);       /* (whom, as a person named it) */
+            break;
+        }
+        /* Alarms outlast the link and a restart, so where the Echo has a key only its holder sets them */
+        if (key == KEY_ALARMS) {
+            if (c < 0 || (have_key && !clients[c].keyed)) fprintf(stderr, "alarms: refused, the action did not come over the keyed connection\n");
+            else fprintf(stderr, "alarms: %d kept\n", core_alarms_set(args[0]));
             break;
         }
         /* the network key only from Home Assistant itself: a client holding the device key (without one, anyone on the

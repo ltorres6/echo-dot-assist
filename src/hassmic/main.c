@@ -2876,6 +2876,72 @@ void core_alarm_stop(const char *why)
     if (connected && proto->timers_changed) proto->timers_changed();
 }
 
+/* Alarms (PLAN.md "offline alarm clock"): times of day that ring here whether Home Assistant is there or not.  Home
+ * Assistant has timers only, kept in memory, and whatever keeps alarms there (an automation, an integration) is gone
+ * with it at the one moment that counts.  So Home Assistant hands the Echo the times ahead (the action "alarms": Unix
+ * seconds, the whole list each time), they are kept in state/alarms across a restart, and each rings by the Echo's own
+ * clock as a finished timer does: the same sound, ring time, lights, entities and ways to stop it.  The wall clock, not
+ * the monotonic one the timers use: an alarm is a time of day, and Home Assistant's time moves the clock under it
+ * (clock.c).  One whose time passed more than ALARM_LATE_S ago (the Echo was off, the clock was set forward) is
+ * dropped: an alarm for 7 that rings at 9 is worse than none */
+#define ALARMS_MAX 16
+#define ALARM_LATE_S 600
+static long long alarms[ALARMS_MAX];                            /* lock held: Unix seconds */
+static int nalarms;                                             /* lock held */
+static atomic_llong alarm_next = LLONG_MAX;                     /* the first of them: the earcon thread looks without the lock */
+
+static void alarms_keep(int save)       /* lock held: the first one for the earcon thread, and all of them on the flash */
+{
+    char text[ALARMS_MAX * 21 + 2]; size_t n = 0; long long next = LLONG_MAX;
+    for (int i = 0; i < nalarms; i++) {
+        if (alarms[i] < next) next = alarms[i];
+        n += (size_t)snprintf(text + n, sizeof text - n, "%lld ", alarms[i]);
+    }
+    atomic_store(&alarm_next, next);
+    text[n] = '\n'; text[n + 1] = 0;
+    if (save && write_state("alarms", text)) fprintf(stderr, "alarms: not saved, gone with the next restart: %s\n", strerror(errno));
+}
+
+static int alarms_take(const char *list, int save)      /* lock held */
+{
+    long long now = time(NULL);
+    nalarms = 0;
+    for (const char *p = list; *p && nalarms < ALARMS_MAX; ) {
+        char *end; long long at = strtoll(p, &end, 10);
+        if (end == p) { p++; continue; }                /* whatever stands between the numbers */
+        if (at > now - ALARM_LATE_S) alarms[nalarms++] = at;
+        p = end;
+    }
+    alarms_keep(save);
+    return nalarms;
+}
+
+int core_alarms_set(const char *list) { return alarms_take(list, 1); }
+
+static void alarms_load(void)           /* lock held: what was kept before the restart */
+{
+    char p[300], text[ALARMS_MAX * 21 + 2] = ""; FILE *f;
+    state_file(p, sizeof p, "alarms");
+    if (!(f = fopen(p, "r"))) return;
+    if (fgets(text, sizeof text, f) && alarms_take(text, 0)) fprintf(stderr, "alarms: %d kept from before the restart\n", nalarms);
+    fclose(f);
+}
+
+static void alarms_due(void)            /* lock held: the ones whose time has come ring as finished timers */
+{
+    long long now = time(NULL); int n = 0;
+    for (int i = 0; i < nalarms; i++) {
+        if (alarms[i] > now) { alarms[n++] = alarms[i]; continue; }
+        time_t at = (time_t)alarms[i]; struct tm tm; char id[40], name[16] = "alarm";
+        if (now - alarms[i] > ALARM_LATE_S) { fprintf(stderr, "alarms: one missed by %lld s, not rung\n", now - alarms[i]); continue; }
+        snprintf(id, sizeof id, "alarm-%lld", alarms[i]);
+        if (localtime_r(&at, &tm)) strftime(name, sizeof name, "%H:%M", &tm);   /* what \"Ringing timers\" calls it */
+        core_timer_finished(id, name, 0);
+    }
+    nalarms = n;
+    alarms_keep(1);
+}
+
 /* What core_transcript compares: lower case, without spaces, punctuation and hyphens ("drop-in"), and the letters of
  * U+00C0..U+017F and Romanian's ș ț without their marks.  Speech to text writes a word with its marks or without them
  * ("închide", "inchide"), and capitalises the first one ("Închide": tolower() leaves UTF-8 alone), so every list
@@ -3200,6 +3266,9 @@ static void *earcon_thread(void *arg)
     for (;;) {
         if (mono_ms() > atomic_load(&timers_stale_at)) {               /* a timer Home Assistant forgot; first: a Drop In's ring continues */
             pthread_mutex_lock(&core_lock); timers_prune(); pthread_mutex_unlock(&core_lock);
+        }
+        if (time(NULL) >= atomic_load(&alarm_next)) {                  /* an alarm's time has come */
+            pthread_mutex_lock(&core_lock); alarms_due(); pthread_mutex_unlock(&core_lock);
         }
         /* Amazon's own sounds where the image has them; the generated blip stands in for the wake and touch sounds otherwise */
         for (int p = atomic_exchange(&sounds_pending, 0), s = 0; p && s < SND_COUNT; s++) {
@@ -4562,7 +4631,7 @@ int main(int argc, char **argv)
     static const struct improv_hooks improv_hooks = { improv_attention, improv_authorized };
     if (use_bt) improv_start(&improv_hooks);                 /* setup over Bluetooth, when there is no network (improv.c) */
     if (ota_port) ota_start(ota_port);
-    pthread_mutex_lock(&core_lock); core_timer_sound_default(); settings_load(); settings_preset(); pthread_mutex_unlock(&core_lock);    /* whatever the protocol */
+    pthread_mutex_lock(&core_lock); core_timer_sound_default(); settings_load(); settings_preset(); alarms_load(); pthread_mutex_unlock(&core_lock);    /* whatever the protocol */
     pthread_mutex_lock(&core_lock); core_volume(); tell_plugins(); pthread_mutex_unlock(&core_lock);      /* what plugins are told at their READY (plugin.c) */
     ringlive_begin();                   /* the mute and the Echo's own patterns known: what the last run left lit, dark */
     davs_start();                                             /* Amazon login for artifact downloads (settings page) */
