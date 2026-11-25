@@ -17,7 +17,7 @@ PORT, HTTP_PORT, WEB, HTTPS_PORT, SELF_PORT = 17101, 17102, 17103, 17104, 17105
 
 async def main(e):
     proc, state, env, play, mdns, page, conf = e.proc, e.state, e.env, e.play, e.mdns, e.page, e.conf
-    echo_log = e.log                    # (an "except ... as e" below unbinds e)
+    echo, echo_log = e, e.log           # (an "except ... as e" below unbinds e)
     ha = await home_assistant(e)
     va = ha.va; started, stopped, mic = va.started, va.stopped, va.mic
     handle_start, handle_stop, handle_audio, handle_finished = va.handle_start, va.handle_stop, va.handle_audio, va.handle_finished
@@ -150,6 +150,25 @@ async def main(e):
     t0 = time.monotonic(); await until(lambda: ringing() == (False, ""), 5)
     check(ringing() == (False, "") and time.monotonic() - t0 < 3, f"rings out after the ring time: {time.monotonic() - t0:.1f} s")
     page.set(timer_ring=60)
+
+    # Alarms: the times ahead handed over as Unix seconds, kept in state/alarms, rung by the Echo's own clock as a
+    # finished timer is (named by its time of day), whether Home Assistant is there or not
+    _, services = await cli.list_entities_services()
+    alarms = next((v for v in services if v.name == "alarms"), None)
+    check(alarms is not None and [(a.name, int(a.type)) for a in alarms.args] == [("at", 3)], f"the alarms action: at, a string ({alarms})")
+    kept = lambda: open(f"{state}/alarms").read().split() if os.path.exists(f"{state}/alarms") else None
+    now = int(time.time()); soon, later = now + 2, now + 3600
+    await cli.execute_service(alarms, {"at": f"{now - 3600} {soon}, {later}"})
+    await until(lambda: kept() == [str(soon), str(later)])
+    check(kept() == [str(soon), str(later)] and ringing() == (False, ""), f"two alarms kept for a restart, the one an hour past dropped, nothing rings yet: {kept()}, {ringing()}")
+    name = time.strftime("%H:%M", time.localtime(soon))
+    await until(lambda: ringing() == (True, name), 6)
+    check(ringing() == (True, name) and time.time() >= soon and kept() == [str(later)], f"it rings at its time, named by it, and only the other is kept: {ringing()}, {kept()}")
+    proc.send_signal(signal.SIGUSR2); await until(lambda: ringing() == (False, ""))     # the button stops it
+    check(ringing() == (False, ""), f"the button stops an alarm as it stops a timer: {ringing()}")
+    await cli.execute_service(alarms, {"at": ""})
+    await until(lambda: kept() == [])
+    check(kept() == [], f"an empty list takes them all away: {kept()}")
 
     proc.send_signal(signal.SIGUSR1); await asyncio.wait_for(started.wait(), 5)
     cli.send_voice_assistant_event(Ev.VOICE_ASSISTANT_ERROR, {"code": "stt-no-text-recognized", "message": "nothing heard"})
@@ -395,6 +414,18 @@ async def main(e):
     check(last3(sa.key, SwitchState) is False and conf().get("screen_brightness_auto") == "off", "switched off on the page: Home Assistant follows")
     ps = {x["name"]: x for x in page.state()["settings"]}
     check(all(k in ps for k in ("screen_brightness_auto", "screen_brightness", "screen_brightness_adjust")), "on the settings page")
+
+    # Alarms after a restart and without Home Assistant: what state/alarms kept rings with nobody connected
+    proc.terminate(); proc.wait()
+    now = int(time.time())
+    with open(f"{state}/alarms", "w") as f: f.write(f"{now - 3600} {now + 2} {now + 7200} \n")
+    before = len(echo_log())
+    echo.proc = subprocess.Popen(proc.args, env=env, stderr=open(echo.logpath, "a"))
+    since = lambda: echo_log()[before:]
+    await until(lambda: re.search(r"alarm: .* rings", since()), 8)
+    check("alarms: 2 kept from before the restart" in since() and re.search(r"alarm: .* rings \(1 ringing\)", since()) and time.time() >= now + 2
+          and open(f"{state}/alarms").read().split() == [str(now + 7200)],
+          f"after a restart, with no Home Assistant: the alarm rings at its time, the one ahead stays kept: {since()[-300:]!r}")
 
 TZDATA = tempfile.mktemp(suffix=".tzdata"); build_tzdata(TZDATA)          # bionic's, from Python's tzdata
 try: run(main, (PORT, HTTP_PORT, WEB, HTTPS_PORT, SELF_PORT), {"HASSMIC_FAKE_BACKLIGHT": "1", "HASSMIC_TZDATA": TZDATA}, log=True)

@@ -2,6 +2,15 @@
 
 What changed for people using the Echo, newest first. Details and measurements are in [PLAN.md](PLAN.md).
 
+## 2026-11-25 — Alarms that ring without Home Assistant
+
+- **An Echo can keep alarms and ring them by itself.** Home Assistant has timers only, and whatever rings an alarm
+  from there (an automation, an integration) cannot when Home Assistant is down or restarting at that minute. A new
+  action per Echo, `esphome.<name>_alarms`, hands it the times ahead; the Echo keeps them across a restart and rings
+  each by its own clock, as a finished timer rings: the same sound, volume, ring time, lights and ways to stop it,
+  and "Timer ringing" in Home Assistant. Setting, repeating and snoozing alarms stays with whatever calls the action.
+  See [Alarms](docs/GUIDE.md#alarms). ESPHome protocol only.
+
 ## 2026-11-25 — Echo Show: Screen off stays off, motion with Wyoming too
 
 - **Screen off from the drawer now stays off** with **Motion wakes the screen** on: someone moving no longer turns it
