@@ -7,10 +7,12 @@ HASSMIC_LED_SHIM): each change into the slot not shown, then shown, then the old
 as one animation; the light off the ring while the Echo's own listening ring shows; without the shim nothing shown."""
 import asyncio, json, os, re, shutil, signal, socket, struct, subprocess, sys, tempfile, threading
 from aioesphomeapi import APIClient, LightInfo, NumberInfo, VoiceAssistantEventType as Ev
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from webclient import wait_port, Browser
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOST = f"{ROOT}/build/hassmic-host"
-PORT = 16983
+PORT, WEB = 16983, 16984
 
 
 def check(cond, what):
@@ -258,6 +260,22 @@ async def main():
         await c.disconnect()
     finally:
         proc.terminate(); proc.wait()
+
+    # The settings page: stock's patterns, which are binary only here, as text to start a design from
+    web = subprocess.Popen([HOST, "-P", "esphome", "-p", str(PORT), "-n", "Echo Dot", "-W", str(WEB), "-a", "0", "-z", "0", "-o", "0"], env=env)
+    try:
+        wait_port(PORT, WEB)
+        b = Browser(WEB)
+        check(b.login_with_button(web), "the settings page: logged in with the button")
+        st, _, body = b.call("GET", "/api/ring/stock/listen")
+        check(st == 200 and decode(encode(body.decode())) == decode(open(os.path.join(etc, "led-resources", "0.active-start.animation_bin"), "rb").read())
+              and "0FF" in body.decode().upper().replace("00FFFF", "0FF"),
+              f"stock's listening ring for the designer, read from its binary ({st}: {body[:60]!r})")
+        st, _, body = b.call("GET", "/api/ring/stock/volume")
+        check(st == 200 and body.decode().startswith("step 05\n2000:"), f"volume: stock's steps from their binaries, each named ({st}: {body[:40]!r})")
+        check(b.call("GET", "/api/ring/stock/think")[0] == 404, "a pattern stock does not have: not found")
+    finally:
+        web.terminate(); web.wait()
     shutil.rmtree(tmp)
     print("FAILED" if check.failed else "all good")
     sys.exit(1 if check.failed else 0)

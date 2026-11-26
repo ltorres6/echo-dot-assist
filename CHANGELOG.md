@@ -2,6 +2,12 @@
 
 What changed for people using the Echo, newest first. Details and measurements are in [PLAN.md](PLAN.md).
 
+## 2026-11-26 — Echo Dot 5: Amazon's patterns on the Light ring page
+
+- **Echo Dot 5: the Light ring page shows Amazon's patterns.** Each slot's own pattern, and the ones a design can
+  start from, were dark there: the Dot 5 keeps them in a binary form the page's side did not read (the ring itself
+  always did). They are read now, the volume steps too.
+
 ## 2026-11-26 — Wi-Fi: moving to a stronger access point
 
 - **Echo Dots and the Echo 2 now move between the access points of a mesh** (issue #234). Before, an Echo stayed on

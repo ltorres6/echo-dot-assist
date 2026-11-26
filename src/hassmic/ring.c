@@ -1330,7 +1330,34 @@ int ring_check(const char *applied, size_t n, char *err, size_t cap)
 }
 
 int ring_designs_live(void) { return 0; }                  /* root installs them, ledcontroller restarts */
-char *ring_stock(int i, size_t *n) { (void)i; (void)n; return NULL; }   /* stock's own files */
+/* Stock's pattern of a slot as text for the settings page.  Where stock's are text files, NULL: ringdesign.c reads
+ * them itself.  The Echo Dot 5 has binary ones only (ACS above), which it cannot read: every pattern the page offered
+ * to start a design from was dark there, and so was each slot's "Amazon's" (2026-11-25).  Decoded here as the turned
+ * listening ring is; a volume as every step there is, "step NN" before each (rd_stock's shape) */
+char *ring_stock(int i, size_t *n)
+{
+    if (i < 0 || i >= ring_nslots || !acs()) return NULL;
+    char *t = NULL;
+    if (ring_slots[i].kind == RING_VOLUME || ring_slots[i].kind == RING_ASSIST) {
+        struct buf b = { 0 };
+        for (int st = 1; st <= 99; st++) {
+            char name[40], head[16]; snprintf(name, sizeof name, "volume_step-%02d", st);
+            char *s = anim_text(name, 1);
+            if (!s) continue;
+            bcat(&b, head, (size_t)snprintf(head, sizeof head, "step %02d\n", st));
+            bcat(&b, s, strlen(s));
+            if (s[0] && s[strlen(s) - 1] != '\n') bcat(&b, "\n", 1);
+            free(s);
+        }
+        if (b.bad || !b.p) { free(b.p); return NULL; }
+        bcat(&b, "", 1);                    /* a string, as the single pattern is */
+        if (b.bad) { free(b.p); return NULL; }
+        t = b.p;
+    }
+    else t = anim_text(ring_slots[i].stock, 1);
+    if (t) *n = strlen(t);
+    return t;
+}
 
 int ring_slot_available(int i) { pthread_mutex_lock(&lock); int r = i >= 0 && i < ring_nslots && slot_avail[i]; pthread_mutex_unlock(&lock); return r; }
 int ring_slot_live(int i) { pthread_mutex_lock(&lock); int r = i >= 0 && i < ring_nslots && slot_on[i]; pthread_mutex_unlock(&lock); return r; }
